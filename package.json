@@ -1,0 +1,15 @@
+{
+  "name": "aura-learn",
+  "version": "1.0.0",
+  "private": true,
+  "type": "module",
+  "description": "Self-hosted, multi-provider AI study app (NotebookLM-style). Vanilla frontend + Node/SQLite backend.",
+  "scripts": {
+    "start": "node --disable-warning=ExperimentalWarning server/index.js",
+    "dev": "node --watch --disable-warning=ExperimentalWarning server/index.js"
+  },
+  "dependencies": {
+    "express": "^4.21.2",
+    "jszip": "^3.10.1"
+  }
+}
