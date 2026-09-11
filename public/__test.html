@@ -1,0 +1,87 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <script type="importmap">
+      { "imports": { "marked": "https://esm.run/marked" } }
+    </script>
+  </head>
+  <body>
+    <pre id="out">RUNNING</pre>
+    <script type="module">
+      import { state } from '/js/state.js';
+      import { t, aiLangFor } from '/js/i18n.js';
+      import { renderModals } from '/js/views/modals.js';
+      import { renderHeader } from '/js/views/dashboard.js';
+      import { renderUnit } from '/js/views/unitView.js';
+
+      const results = [];
+      const check = (name, cond) => results.push(`${cond ? 'PASS' : 'FAIL'} ${name}`);
+
+      // aiLangFor coupling
+      check('aiLangFor en→English', aiLangFor('en') === 'English');
+      check('aiLangFor es→Spanish', aiLangFor('es') === 'Spanish');
+      check('aiLangFor fr→French', aiLangFor('fr') === 'French');
+
+      // interpolation
+      state.lang = 'en';
+      check('t() interpolation', t('fc_card_x_of_y', { pos: 2, total: 5 }) === 'Card 2 of 5');
+      check('t() fallback to key', t('___missing___') === '___missing___');
+
+      // --- Spanish UI ---
+      state.lang = 'es';
+      state.tree = []; state.sel = { courseId: null, subjectId: null, unitId: null };
+      let h = renderHeader();
+      check('ES header title "Panel"', h.includes('Panel'));
+      check('ES new-course button', h.includes('Nuevo Curso'));
+      check('ES help button label', h.includes('Ayuda'));
+
+      // --- French UI tabs (unit view) ---
+      state.lang = 'fr';
+      state.unit.viewMode = 'explanations';
+      const unit = { id: 'u', name: 'U', explanations: [], exam: null, submission: null };
+      const uh = renderUnit(unit);
+      check('FR tab Explications', uh.includes('Explications'));
+      check('FR tab Étude', uh.includes('Étude'));
+      check('FR tab Examen', uh.includes('Examen'));
+
+      // --- Settings: single language picker, no AI-content select ---
+      state.lang = 'en'; state.servers = []; state.modal = 'settings';
+      let m = renderModals();
+      check('settings has language select', m.includes('name="lang"'));
+      check('settings has NO aiLanguage select', !m.includes('name="aiLanguage"'));
+      check('settings language help text', m.includes('interface'));
+
+      // --- Help modal: contextual + localized ---
+      state.tree = [{ id: 'c', name: 'C', subjects: [{ id: 's', name: 'S', units: [{ id: 'u', name: 'U', explanations: [], exam: null, submission: null }] }] }];
+      state.sel = { courseId: 'c', subjectId: 's', unitId: 'u' };
+      state.unit.viewMode = 'flashcards';
+      state.lang = 'es'; state.modal = 'help';
+      m = renderModals();
+      check('help title localized (Tarjetas)', m.includes('Tarjetas'));
+      check('help body localized (SM-2)', m.includes('SM-2'));
+      check('help links to workflow overview', m.includes('data-modal="welcome"'));
+
+      // context switches with the active tab
+      state.unit.viewMode = 'sources';
+      m = renderModals();
+      check('help context=sources (RAG)', m.includes('RAG'));
+
+      // dashboard context when no unit selected
+      state.sel = { courseId: null, subjectId: null, unitId: null };
+      m = renderModals();
+      check('help context=dashboard', m.includes('Curso → Asignatura'));
+
+      // --- Welcome / onboarding modal ---
+      state.modal = 'welcome';
+      m = renderModals();
+      check('welcome title localized', m.includes('Bienvenido a Aura Learn'));
+      check('welcome structure chips', m.includes('Curso') && m.includes('Asignatura') && m.includes('Unidad'));
+      check('welcome tool chips', m.includes('Tarjetas') && m.includes('Examen') && m.includes('Estudio'));
+      check('welcome get-started button', m.includes('Empezar'));
+
+      const failed = results.filter((r) => !r.startsWith('PASS'));
+      document.getElementById('out').textContent = results.join('\n') + '\n\n' + (failed.length ? 'OVERALL FAIL' : 'OVERALL PASS');
+    </script>
+  </body>
+</html>
