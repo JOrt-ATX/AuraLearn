@@ -29,8 +29,9 @@ dev = [
 # Supply-chain cooldown (G3): nothing published after this instant is resolved.
 # Security-patch exceptions are recorded in docs/dependency-policy.json.
 exclude-newer = "2026-09-08T00:00:00Z"
-# Security-patch exception: urllib3 2.7.0 has PYSEC-2026-4175/4176/4177, fixed in 2.8.0.
-exclude-newer-package = { urllib3 = "2026-10-09T00:00:00Z" }
+# Security-patch exceptions (recorded in docs/dependency-policy.json):
+#   urllib3 2.8.0 fixes PYSEC-2026-4175/4176/4177; mako 1.4.3 fixes GHSA-5639-2j2p-m4mx.
+exclude-newer-package = { urllib3 = "2026-10-09T00:00:00Z", mako = "2026-10-09T00:00:00Z" }
 package = false
 required-environments = [
     "sys_platform == 'win32'",

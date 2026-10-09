@@ -1,0 +1,75 @@
+{
+  "cooldown_days": 30,
+  "exceptions": [
+    {
+      "ecosystem": "npm",
+      "name": "vite",
+      "version": "6.4.4",
+      "advisories": [
+        "GHSA-rq7h-c2jc-7f22",
+        "GHSA-9jrq-w75r-8gcw"
+      ],
+      "reason": "Security patch for 6.4.3 (dev-server file exposure and cross-origin script execution)."
+    },
+    {
+      "ecosystem": "npm",
+      "name": "brace-expansion",
+      "version": "2.1.7",
+      "advisories": [
+        "GHSA-q2hr-2g5m-vwhr",
+        "GHSA-qhr7-859c-m2p7",
+        "GHSA-6j4f-fj2g-mc7p"
+      ],
+      "reason": "Security patch for 2.1.4 (ReDoS / stack exhaustion), transitive of dev tooling."
+    },
+    {
+      "ecosystem": "npm",
+      "name": "brace-expansion",
+      "version": "5.0.12",
+      "advisories": [
+        "GHSA-q2hr-2g5m-vwhr",
+        "GHSA-qhr7-859c-m2p7",
+        "GHSA-6j4f-fj2g-mc7p"
+      ],
+      "reason": "Security patch for 5.0.9 (ReDoS / stack exhaustion), transitive of dev tooling."
+    },
+    {
+      "ecosystem": "npm",
+      "name": "source-map-js",
+      "version": "1.2.2",
+      "advisories": [
+        "GHSA-68fv-2mgg-jv7q"
+      ],
+      "reason": "Security patch for 1.2.1 (event-loop DoS), transitive of postcss."
+    },
+    {
+      "ecosystem": "npm",
+      "name": "@redocly/openapi-core",
+      "version": "1.34.20",
+      "advisories": [
+        "GHSA-2883-xcg3-v3hh"
+      ],
+      "reason": "Security patch for 1.34.19 (via js-yaml GHSA-2883-xcg3-v3hh), transitive of openapi-typescript."
+    },
+    {
+      "ecosystem": "PyPI",
+      "name": "urllib3",
+      "version": "2.8.0",
+      "advisories": [
+        "PYSEC-2026-4175",
+        "PYSEC-2026-4176",
+        "PYSEC-2026-4177"
+      ],
+      "reason": "Security patch for 2.7.0 (unbounded chunk-size buffering), transitive of dev tooling."
+    },
+    {
+      "ecosystem": "PyPI",
+      "name": "mako",
+      "version": "1.4.3",
+      "advisories": [
+        "GHSA-5639-2j2p-m4mx"
+      ],
+      "reason": "Security patch for 1.4.1 (Windows path traversal in TemplateLookup), transitive of alembic."
+    }
+  ]
+}
