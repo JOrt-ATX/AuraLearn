@@ -1,0 +1,617 @@
+# Aura Learn — Product & Technical Specification
+
+| | |
+|---|---|
+| **Status** | Reflects the code on branch `initial-import` as of 2026-10-07 |
+| **Audience** | Maintainers and contributors (human or AI) who need to know *what the app does and how it is built* |
+| **Companion docs** | [README.md](../README.md) (how to run) · [DEVELOPMENT_PLAN.md](DEVELOPMENT_PLAN.md) (history, conventions, roadmap rationale) · [PROMPT_FOLDER_INGEST.md](PROMPT_FOLDER_INGEST.md) (folder-ingest design) · [security_assessment.md](../security_assessment.md) |
+
+This document describes the system **as implemented**. Where the code and an older
+document disagree, the code wins and the difference is listed in [§14](#14-known-gaps-and-doc-drift).
+
+---
+
+## 1. Purpose and scope
+
+Aura Learn is a **private, self-hosted, single-user study app** in the spirit of NotebookLM.
+The learner builds a curriculum (**Course → Subject → Unit**), has an LLM of their choice write
+explanations, then studies the material through chat, flashcards, study guides, exams and
+spoken "teach-back" practice. Everything is stored in one local SQLite file.
+
+### Goals
+
+- **Local-first.** No cloud service owned by this project, no accounts. Data leaves the machine
+  only toward endpoints the user configured (their LLM server, optional Whisper/Chatterbox,
+  optional web lookups described in §9).
+- **Bring your own model.** Any OpenAI-compatible endpoint (Ollama, LM Studio, vLLM, OpenRouter,
+  OpenAI, Groq, Mistral…) or native Gemini, switchable at runtime, with per-model behaviour
+  normalisation so small local models still work.
+- **Lightweight stack.** Vanilla JS frontend with no build step; Node + Express + built-in
+  `node:sqlite` backend; two npm runtime dependencies.
+- **Keys stay server-side.** The browser never receives an API key.
+
+### Non-goals
+
+- Multi-user support, authentication, sharing or collaboration.
+- Network exposure (the server binds to loopback by default).
+- A frontend framework or bundler.
+- Hosted/SaaS deployment.
+
+---
+
+## 2. Users and primary workflows
+
+There is exactly one user (the owner of the machine). Typical flows:
+
+1. **Configure** an LLM server (Settings → Servers), optionally Whisper (speech-to-text) and
+   Chatterbox (text-to-speech).
+2. **Create a course** — by hand, with AI-generated objectives and structure, or from a folder of
+   documents (§8.2).
+3. **Generate explanations** for each unit (from a title, pasted text, a PDF, or the unit's sources).
+4. **Study**: chat with the unit's material, review flashcards, generate study guides / mind maps /
+   infographics / diagrams, take exams, record teach-back explanations.
+5. **Annotate**: select text in an explanation to get a quick explanation, an illustration, or a note.
+6. **Move content**: export/import courses, subjects or units as ZIP files.
+
+---
+
+## 3. Architecture
+
+```
+Browser (vanilla ES modules, no build)
+   │  fetch /api/*  (JSON; raw bytes for audio and zip uploads)
+   ▼
+Express 4  (server/index.js, binds 127.0.0.1:8787)
+   ├─ routes/*        thin HTTP handlers (camelCase JSON ⇄ snake_case DB)
+   ├─ services/llm/   provider facade → openai.js | gemini.js, profiles, prompts, JSON repair, call log
+   ├─ services/rag.js chunking, embeddings, cosine retrieval
+   ├─ services/stt/   → whisper.js   (local whisper.cpp HTTP server)
+   ├─ services/tts/   → chatterbox.js (local Chatterbox HTTP server)
+   ├─ services/images/→ wikimedia.js, openverse.js  (term illustrations)
+   └─ node:sqlite     data/aura.db  (+ data/audio, data/images, data/sources, data/.secret.key)
+```
+
+### 3.1 Technology
+
+| Layer | Choice | Notes |
+|---|---|---|
+| Runtime | Node.js **22+** | Uses built-in `node:sqlite` (experimental; warning suppressed by npm scripts). Developed on Node 24. |
+| HTTP | Express `^4.21.2` | JSON body limit 25 MB; raw bodies for audio (20 MB) and ZIP import (100 MB). |
+| Storage | SQLite via `node:sqlite` | WAL mode, foreign keys ON, schema applied idempotently at boot. |
+| ZIP | `jszip ^3.10.1` | Export/import only. |
+| Frontend | Native ES modules | Tailwind Play CDN, `marked` and `markmap` via esm.run, `pdfjs-dist`/JSZip loaded on demand from CDN, DOMPurify vendored in `public/vendor/dompurify/`. |
+| Tests | `node --test` | Co-located `*.test.js` for pure logic (see §12). No frontend test runner. |
+
+### 3.2 Process and deployment
+
+- `npm run dev` (watch) / `npm start` → <http://localhost:8787>.
+- Environment: `PORT` (default 8787), `HOST` (default `127.0.0.1`), `DATA_DIR`, `DB_PATH`,
+  optional `GOOGLE_CSE_API_KEY` + `GOOGLE_CSE_CX` (§9.3).
+- `start.bat` is the Windows launcher; `scripts/build-portable.ps1` builds
+  `dist/aura-learn-portable.zip` (app files + a bundled `node.exe`, empty `data/`).
+- At boot the server runs `migrateProviderSecrets()` (encrypts legacy plaintext keys) and, after
+  listening, fire-and-forget backfills the RAG index for un-indexed explanations and notes.
+
+### 3.3 Repository layout
+
+```
+server/
+  index.js            boot, router mounting, static files, SPA fallback
+  db.js               connection, schema apply, ensureColumn() / table-rebuild migrations, uid()
+  schema.sql          all tables
+  routes/             one file per feature area (see §10)
+  services/           llm/, tts/, stt/, images/, rag, srs, ingest, exportImport, extract, citations, crypto
+public/
+  index.html          shell: Tailwind CDN, importmap(marked), <div id="app">
+  css/styles.css
+  js/                 app.js (orchestrator), state.js, api.js, i18n.js, ui.js, extractors.js, icons.js, selectors.js
+  js/views/           dashboard, unitView, flashcards, study, teachback, modals
+  vendor/dompurify/
+scripts/              build-portable.{ps1,bat}, import-syllabus.mjs (one-off seed)
+docs/                 DEVELOPMENT_PLAN.md, PROMPT_FOLDER_INGEST.md, SPEC.md
+```
+
+### 3.4 Conventions
+
+- **API JSON is camelCase; DB columns are snake_case.** Routes map between them (`toPublic()`).
+- **IDs** are `crypto.randomUUID()`; timestamps are unix seconds (`unixepoch()`).
+- **Routes are mounted before the catch-all content router** so specific paths such as
+  `/units/:id/sources` resolve first.
+- **Schema evolution:** new tables go in `schema.sql`; new columns on existing tables also need an
+  `ensureColumn()` line in `db.js`; widening a `CHECK` constraint rebuilds the table
+  (`ensureArtifactKind`).
+- **Frontend pattern:** a single mutable `state` object → `render()` rebuilds `#app.innerHTML` from
+  view functions that return HTML strings → interaction through `data-action` attributes and
+  global delegated listeners in `app.js`. No re-render per keystroke (text inputs are read on
+  action). All user/AI strings pass through `escapeHtml()` or `renderMarkdown()` (marked +
+  DOMPurify).
+
+---
+
+## 4. Domain model
+
+```
+Course ─┬─ objectives (text)
+        └─ Subject ── Unit ─┬─ Explanation ─┬─ term_explanations   (cached "explain this")
+                            │               ├─ term_images         (cached illustration)
+                            │               ├─ notes               (user annotations)
+                            │               └─ explanation_chunks  (RAG index)
+                            ├─ Source ── chunks                    (RAG index)
+                            ├─ chat_messages
+                            ├─ flashcards                          (SM-2 state inline)
+                            ├─ artifacts   (study_guide | mindmap | infographic | diagram)
+                            ├─ exams ── exam_results               (one result per exam)
+                            └─ audio       (kind: 'tts' narration | 'teachback' recording)
+Course ── ingest_docs                                              (folder-ingest staging)
+Global:  servers · stt_providers · tts_providers · settings · llm_log
+```
+
+Deleting a course/subject/unit hard-deletes everything beneath it through `ON DELETE CASCADE`.
+
+### 4.1 Tables
+
+| Table | Key columns / notes |
+|---|---|
+| `courses` | `name`, `objectives` |
+| `subjects` | `course_id`, `name` |
+| `units` | `subject_id`, `name` |
+| `explanations` | `unit_id`, `prompt` (the title/topic), `content` (Markdown/HTML-ish text; **empty string = planned but not yet written**), `citations_json` |
+| `term_explanations` | unique `(explanation_id, term COLLATE NOCASE)`; short AI definition of a selected term |
+| `term_images` | unique `(explanation_id, term)`; `file_path`, `page_url`, `attribution`, `license`, `caption` |
+| `notes` | `explanation_id`, `content`, `anchor_text`, `label`, `embedding_json` (lazy) |
+| `sources` | `unit_id`, `filename`, `mime`, `text`, `file_path` (column exists; **not written by the current add-source route**) |
+| `chunks` | `source_id`, `ord`, `text`, `embedding_json` |
+| `explanation_chunks` | same shape, keyed by `explanation_id` |
+| `chat_messages` | `unit_id`, `role`, `content`, `citations_json` — one shared thread per unit |
+| `flashcards` | `front`, `back`, `due_at`, `interval` (days), `ease`, `reps` |
+| `artifacts` | `kind ∈ {study_guide, mindmap, infographic, diagram}`, `title`, `content` |
+| `exams` | `questions_json` — array of `{id, type:'mcq'|'written', questionText, options, correctAnswer, explanation}`; multiple exams per unit |
+| `exam_results` | unique per `exam_id`; `answers_json`, `score` (MCQ count), `feedback_json`, `written_feedback_json`, `written_score`, `total_score` |
+| `submissions` | **Legacy** single-exam results; migrated into `exam_results` at boot, otherwise unused |
+| `audio` | Shared by two features: `kind='tts'` (`script`, `file_path`, `source_type` ∈ {explanation, study_guide}, `source_id`) and `kind='teachback'` (`transcript`, `score`, `feedback_json`, `explanation_ids`, `stt_provider`) |
+| `servers` | `type ∈ {openai, gemini}`, `base_url`, `api_key` (encrypted), `model`, `multimodal_model`, `embedding_model`, `is_active` (one active) |
+| `stt_providers` | `type='whisper'`, `base_url`, `api_key`, `is_active` |
+| `tts_providers` | `type='chatterbox'`, `base_url`, `api_key`, `is_active` |
+| `settings` | key/value strings: `lang`, `speechEnabled`, `ttsEnabled`, `welcomed` |
+| `llm_log` | per `generateJSON` call: `model`, `task`, `attempts`, `ok`, `latency_ms` |
+| `ingest_docs` | staging for folder ingest: `course_id`, `path`, `filename`, `kind` (text/image), `text`, `digest_json`, `status` (pending/digested/failed) |
+
+### 4.2 Files on disk (under `DATA_DIR`, default `./data`)
+
+| Path | Contents |
+|---|---|
+| `aura.db` (+ `-wal`, `-shm`) | The database |
+| `.secret.key` | 32-byte AES key, hex, created on first run (mode 0600 where supported) |
+| `audio/tts/<id>.wav` | Narrations (replaced, not accumulated, per source) |
+| `audio/teachback/<id>.<ext>` | Recordings; **deleted after successful grading** (transcript is kept) |
+| `images/terms/<id>.<ext>` | Illustrations the user chose to keep |
+
+**Backup = copy `aura.db` and `.secret.key` together.** Without the key, stored provider API keys
+cannot be decrypted.
+
+---
+
+## 5. Functional specification
+
+### 5.1 Curriculum management
+
+- Create/delete courses, subjects, units. Delete requires a localized confirmation that warns the
+  action is irreversible; it is a hard delete (no trash).
+- `GET /api/tree` returns the full nested tree (courses → subjects → units with their explanations,
+  exams and results) in one call; the frontend holds it in `state.tree`.
+- **AI structure generation** (titles only, no content): at course, subject or unit level the user
+  picks counts (clamped: subjects 1–8, units/subject 1–8, explanations/unit 1–10; unit-level 1–10).
+  The LLM returns JSON validated for shape; surplus items are sliced off. Created explanations have
+  empty `content` and act as a to-do list.
+- **AI course objectives:** `POST /courses/generate-objectives` from name, level, focus, audience;
+  the result is editable and is stored on the course and fed into structure and grounded-explanation
+  prompts.
+
+### 5.2 Explanations
+
+- **Generator tab** inputs: *Simple* (a prompt/title), *Context* (pasted text), *PDF* (extracted in
+  the browser), plus an optional **"Ground in sources"** checklist of the unit's sources
+  (first 4 000 chars of each selected source are prepended as context).
+- Generation goes through `POST /api/llm/generate`. When `withCitations` is set and the active
+  provider supports it, "further reading" links are attached (§9.3).
+- **Explanations tab:** accordion; per item **edit**, **regenerate** (uses grounded generation when the
+  unit has sources, otherwise the title only), **delete**, text-to-speech narration (when enabled),
+  and a notes/terms/images area. Content renders as Markdown, sanitized with DOMPurify.
+- **Grounded generation** (`POST /explanations/:id/generate-grounded`): retrieves up to 8 chunks from
+  the unit's sources by embedding; if no embeddings exist it falls back to the raw source text
+  truncated to the model's `maxInputChars`. Fails with a message when the unit has no sources.
+  Returns HTTP 200 with `{ok:false,error}` on failure so batch loops continue.
+- Every create/update of an explanation re-indexes it for chat (best-effort; failures are logged,
+  not surfaced).
+
+### 5.3 Selection tools (inside an open explanation)
+
+Selecting text shows a floating trigger offering three actions:
+
+| Action | Behaviour | Persistence |
+|---|---|---|
+| **Explain** | `POST /explanations/:id/terms` — brief AI definition using the explanation as context | Cached per (explanation, term, case-insensitive); repeat asks cost no LLM call; term is marked inline `[n]` and listed as chips |
+| **Illustrate** | Search Wikipedia and Openverse (no download), pick from a carousel, then download only the chosen image | One image per (explanation, term); replaced on re-pick; stores attribution, license, page URL, caption |
+| **Note** | Free-text note, optionally anchored to the selection and tagged with a label | Embedded in the background so chat can cite it |
+
+### 5.4 Sources and chat (RAG)
+
+- **Add a source** to a unit: pasted text, a **URL** (fetched and tag-stripped server-side), or an
+  uploaded **file** (extracted in the browser; see §8.1). The server chunks (~800 chars, ~100
+  overlap, paragraph → sentence → hard-cut boundaries), embeds in batches of 64, and stores chunks.
+  If embedding fails the source row is rolled back and an error returned (so a missing embedding
+  model is visible immediately).
+- **Chat** (`POST /units/:id/chat`): embeds the question, brute-force cosine search across the
+  unit's **source chunks, explanation chunks and notes**, takes the top 6, and asks the model to
+  answer only from them with `[n]` citations. The last 6 messages are sent as history. Returned
+  citations are those the answer references (all hits if none are referenced), each with a 400-char
+  snippet and score. Requires at least one source or non-empty explanation; one persistent thread
+  per unit, clearable.
+- **Requires an embedding model** on the active server.
+
+### 5.5 Flashcards and spaced repetition
+
+- **Generate** 1–30 cards (default 10) from all or a selected subset of the unit's explanations
+  (input truncated to the model's `maxInputChars`); also manual add/edit/delete.
+- **Scheduling: SM-2** (`services/srs.js`). Grades `again|hard|good|easy` map to q = 0/3/4/5.
+  Ease updates by the standard SM-2 formula, floored at 1.3. `q < 3` is a lapse (reps and interval
+  reset to 0; due immediately). Otherwise interval is 1 day, then 6 days, then `round(interval × ease)`.
+  `due_at = now + interval × 86 400 s`.
+- **Review mode** walks the queue of due cards: show front → flip → grade. The tab badge shows the
+  due count.
+
+### 5.6 Study materials
+
+From a unit's explanations (all or selected; falling back to source text when there are none) the
+LLM produces one of four artifacts. All start with a `TITLE:` header line the server strips off.
+
+| Kind | Format | Rendering |
+|---|---|---|
+| `study_guide` | Markdown | `renderMarkdown`; can be narrated (§5.9) |
+| `mindmap` | Nested Markdown outline | markmap |
+| `infographic` | Self-contained HTML fragment | Sandboxed iframe |
+| `diagram` | Diagram markup (see `diagramPrompt`) | Rendered on the client |
+
+Artifacts are listed per unit, expandable, deletable. Input is capped at the model's `maxInputChars`.
+
+### 5.7 Exams
+
+- `POST /units/:id/exam` builds a **10-question exam — 6 multiple-choice + 4 written** — from all
+  the unit's explanations (truncated to `maxInputChars`). Validation: MCQs need exactly 4 options and
+  a `correctAnswer` that matches one verbatim; failures trigger the repair loop (§6.3).
+- A unit can hold **many exams**; each has at most one result.
+- **MCQs are scored in the browser** and saved with `PUT /exams/:id/result` (answers, score,
+  per-question feedback). **Written answers** are graded by the LLM
+  (`POST /exams/:id/grade-written`): each answer scores 0–10 with feedback. The total is the
+  question-count-weighted mean of MCQ % and written %; `written_score` and `total_score` are
+  persisted. Result can be cleared to retake.
+
+### 5.8 Teach-back (Feynman technique) — opt-in
+
+Enabled by Settings → "Speech" (`speechEnabled`); adds a **Teach-back** tab. Requires an active
+Whisper STT provider.
+
+1. Browser records via `MediaRecorder`, re-encodes to **WAV** with the Web Audio API, previews it.
+2. `POST /units/:id/teachback/audio` (raw bytes; allowed types webm/wav/ogg/mp3; ≤ 20 MB; extension
+   comes from a fixed mime map, never the client): transcribe **first**, then write the file, so a
+   failed STT call leaves no orphan. Optional `explanationIds` (validated to belong to the unit)
+   select the grading material.
+3. Student can read the transcript, then `POST /teachback/:id/grade`: LLM returns accuracy and
+   completeness (0–100), gaps, strengths and a suggestion; stored score = mean of the two. The audio
+   file is deleted after grading; transcript and feedback remain. Grading is retryable.
+4. History is listed per unit (newest first), deletable.
+
+### 5.9 Audio narration (text-to-speech) — opt-in
+
+Enabled by `ttsEnabled`; requires an active Chatterbox provider. For an explanation or a study
+guide, the LLM first **condenses the text into a short spoken-style recap** (not a read-aloud), which
+is synthesized to WAV (language passed through) and cached; regenerating replaces the previous file.
+Served at `GET /api/audio/:id/file`.
+
+### 5.10 Export and import
+
+- **Export** a course, subject or unit to a ZIP (`GET /export/:type/:id?formats=…`). Always included:
+  structure, explanations, notes. Optional via `formats`: `exams`, `flashcards`, `sources`, `study`,
+  `chat`. Content is one `manifest.json` (`formatVersion` 1) plus `attachments/` for source files
+  that exist on disk. Embeddings and API keys are never exported.
+- **Import** is two-step: `POST /import/analyze` (raw ZIP ≤ 100 MB) parses it and returns a token plus
+  counts and any **conflict** with existing IDs; `POST /import/commit/:token` inserts it as
+  *overwrite* (upsert by original ID) or *copy* (all IDs regenerated, FKs remapped), optionally into a
+  chosen target course/subject. Tokens live in memory for 10 minutes, max 10 pending. Imported
+  explanations and notes are re-indexed for chat by the boot backfill.
+
+### 5.11 Course from a documentation folder
+
+A resumable, client-orchestrated pipeline (design rationale in `PROMPT_FOLDER_INGEST.md`):
+
+1. **Map.** The browser extracts every file (§8.1) and POSTs them in ~4 MB batches to
+   `/courses/:id/ingest/docs`. Images are described by the active **multimodal model** and then treated
+   as text documents. Each document gets a **heuristic digest** (title, summary, headings as topics) —
+   deliberately *no* LLM call (measured too slow and non-deterministic on local models).
+2. **Plan (reduce).** One LLM call designs subjects/units/explanation titles from a size-budgeted
+   corpus map (60 % of `maxInputChars`). Documents are then **assigned to units by embedding
+   similarity** (document = mean of its chunk vectors; best unit plus others within 0.08, max 3; any
+   unit left empty takes its closest document), so every document lands somewhere without relying on
+   the LLM to reference IDs.
+3. **Preview.** Nothing is persisted; the user can untick units or explanations.
+4. **Commit.** Creates the structure and one `sources` row per (unit, document) in a single
+   transaction, then indexes sources (a missing embedding model degrades to `sourcesIndexed:false`).
+5. **Expand.** The client loops over the new empty explanations calling `generate-grounded`, one at a
+   time, with progress and per-item failure tolerance.
+
+### 5.12 Settings and onboarding
+
+- **General:** language (`en`/`es`/`fr`) — one picker drives both UI strings and the AI output
+  language; Speech and TTS master switches (default off).
+- **Servers:** add/edit/delete/activate/test LLM servers; "Load models" populates generative,
+  multimodal and embedding pickers from the provider. Keys are write-only from the UI (`hasKey` flag).
+- **Speech / TTS:** provider managers mirroring Servers (add, activate, test).
+- First-run **welcome modal** shows the Course → Subject → Unit → tabs workflow; a contextual
+  **Help** modal explains the current page. Both are localized.
+- Preferences are stored server-side in `settings` (not `localStorage`).
+
+### 5.13 Diagnostics
+
+`GET /api/llm/log` aggregates `llm_log` by model and task (calls, success %, average attempts,
+average latency); `/log/recent` returns the last 200 rows; `DELETE /log` clears it. Tasks logged:
+`exam`, `flashcards`, `grading`, `structure`, `ingest-plan`, `teachback`, `json`.
+
+---
+
+## 6. LLM subsystem
+
+### 6.1 Provider facade (`services/llm/index.js`)
+
+`generate()`, `generateJSON()`, `embed()`, `describeImage()`, `listModels()`, `testServer()` resolve the
+**active** `servers` row, decrypt its key in memory, and dispatch to `openai.js` or `gemini.js`.
+With no active server every call fails with *"No active LLM server. Add one in Settings → Servers."*
+
+- **OpenAI-compatible adapter:** chat, embeddings, model listing, vision; if `response_format` causes a
+  400 it retries once without it.
+- **Gemini adapter:** native REST chat, embeddings, model listing, vision, and grounded search for
+  citations.
+
+### 6.2 Model profiles (`profiles.js`)
+
+Matched by regex on the model name; unknown models use `DEFAULT_PROFILE`.
+
+| Profile | Match | Behaviour |
+|---|---|---|
+| default | — | native system role, JSON mode, `maxInputChars` 16 000, no citations |
+| qwen3 | `/qwen3/i` | append `/no_think`, temp 0.3, `maxInputChars` 8 000 |
+| gemma | `/gemma/i` | merge system into first user turn, prompt-only JSON, temp 0.4, 8 000 |
+| mistral | `/mistral/i` | native, JSON mode, temp 0.2, 20 000, **supports citations** |
+
+### 6.3 Structured output and repair
+
+`generateJSON({prompt, system, validate, maxRetries = 2, task})` parses with `parseLooseJSON` (strips
+`<think>` blocks, code fences and trailing commas), runs the caller's validator (returns `null` or an
+error string), and on failure retries up to twice with a repair turn (the bad output, truncated to 6 000
+chars, plus the error) at temperature 0.1. Every call writes an `llm_log` row.
+
+### 6.4 Prompts (`prompts.js`)
+
+Central templates returning `{system, prompt}`: exam, written grading, teach-back, flashcards, study
+guide, TTS summary, mind map, diagram, infographic, quick-explain, objectives, image description,
+structure, curriculum-from-docs, grounded explanation, chat system. **Convention:** context first →
+task → output schema → **language directive last**.
+
+### 6.5 Embeddings and retrieval
+
+Vectors are JSON arrays in `embedding_json`; retrieval is a brute-force cosine scan scoped to one unit.
+Adequate at personal scale; swapping in `sqlite-vec` is the stated upgrade path. A vector-length
+mismatch (model changed) is tolerated by comparing the common prefix, but **changing the embedding
+model requires re-indexing for good results** (no automated re-index exists).
+
+---
+
+## 7. Frontend specification
+
+### 7.1 Screens
+
+- **Dashboard** (no unit selected): sidebar course tree, header with Help, grid of courses/subjects/units.
+- **Unit view** — tab bar with counts/badges:
+
+| Tab | `viewMode` | Content |
+|---|---|---|
+| Generator | `generator` | Input modes, source grounding, generate button |
+| Explanations | `explanations` | Accordion with edit/regenerate/delete/audio, terms, images, notes |
+| Sources & Chat | `sources` | Add sources, source list, chat thread with citation chips |
+| Flashcards | `flashcards` | Generate (with explanation picker), manage, review mode |
+| Study | `study` | Generate/list/render the four artifact kinds, narration |
+| Exam | `exam` | Exam accordion, take, results, written grading |
+| Teach-back | `teachback` | Only when `speechEnabled` |
+
+- **Modals:** create course/subject/unit (with AI options and the "Documentation (folder)" source),
+  settings, server/STT/TTS provider forms, export, import preview, ingest preview, explanation edit,
+  flashcard edit, note editor, term-explain, term-image, welcome, help.
+
+### 7.2 State
+
+`public/js/state.js` holds `state` (global: tree, servers, providers, selection, modal, language,
+feature switches) and a per-unit transient object created by `defaultUnitState()` and reset on unit
+change. Per-tab data loads lazily on first open. Mutations call `emit()`/`setState()`/`setUnit()`,
+which re-render.
+
+### 7.3 Client-side document extraction (`extractors.js`)
+
+Runs entirely in the browser, loading libraries on demand. Accepted: `.pdf .docx .pptx .xlsx .md .html
+.xml .txt .csv .json` and images `.png .jpg .jpeg .webp .gif`. MIME is derived from the extension
+(browsers misreport `.md`/`.xml`). Images become text through the multimodal model during folder ingest.
+
+### 7.4 Internationalization
+
+UI strings in `i18n.js` for **English, Spanish, French**; `t(key, vars)` with `{name}` interpolation.
+The chosen language is also passed to every AI call as the output language. Unknown stored values
+(e.g. legacy `de`) fall back to English.
+
+---
+
+## 8. HTTP API reference
+
+All paths are under `/api`. Errors are `{ "error": "message" }` with 4xx/5xx, except where noted.
+
+### Content (`content.js`)
+
+| Method | Path | Purpose |
+|---|---|---|
+| GET | `/tree` | Full nested tree |
+| POST | `/courses` · `/subjects` · `/units` | Create |
+| DELETE | `/courses/:id` · `/subjects/:id` · `/units/:id` | Cascading delete |
+| POST | `/courses/generate-objectives` | AI objectives |
+| POST | `/courses/:id/generate-structure` · `/subjects/:id/…` · `/units/:id/…` | AI structure |
+| POST | `/units/:unitId/explanations` | Create explanation (+ index) |
+| PUT / DELETE | `/explanations/:id` | Edit (re-indexes on content change) / delete |
+| POST | `/units/:unitId/exam` | Generate exam |
+| PUT / DELETE | `/exams/:examId/result` | Save / clear result (`submission: null` also clears) |
+| POST | `/exams/:examId/grade-written` | LLM-grade written answers |
+
+### LLM, servers, providers
+
+| Method | Path | Purpose |
+|---|---|---|
+| POST | `/llm/generate` · `/llm/json` · `/llm/embed` | Direct generation (`generate` supports `sourceIds`, `withCitations`) |
+| GET / DELETE | `/llm/log` · `/llm/log/recent` | Benchmark data |
+| GET / POST | `/servers` | List / create (first one becomes active) |
+| PUT / DELETE | `/servers/:id` | Update (blank key keeps stored key) / delete |
+| POST | `/servers/:id/activate` · `/:id/test` · `/servers/models` | Activate, test, list models |
+| same shape | `/stt-providers`, `/tts-providers` | CRUD + activate + test |
+| GET / PUT | `/settings` | Preference key/values |
+
+### Learning features
+
+| Method | Path | Purpose |
+|---|---|---|
+| GET / POST | `/units/:unitId/sources` | List / add (text or `url`) |
+| DELETE | `/sources/:id` | Remove source |
+| GET / POST / DELETE | `/units/:unitId/chat` | History / ask / clear |
+| GET | `/units/:unitId/flashcards` · `/flashcards/due` | List / due now |
+| POST | `/units/:unitId/flashcards/generate` · `/units/:unitId/flashcards` | AI generate / manual add |
+| POST | `/flashcards/:id/review` | SM-2 review `{grade}` |
+| PUT / DELETE | `/flashcards/:id` | Edit / delete |
+| GET | `/units/:unitId/artifacts` | List artifacts |
+| POST | `/units/:unitId/study-guide` · `/mindmap` · `/infographic` · `/diagram` | Generate |
+| DELETE | `/artifacts/:id` | Delete |
+| GET / POST / DELETE | `/explanations/:id/terms` · `/terms/:id` | Term explanations |
+| GET / POST | `/explanations/:id/term-images` · `/term-images/search` | List / search candidates / save chosen |
+| GET / DELETE | `/term-images/:id/file` · `/term-images/:id` | Serve / delete |
+| GET / POST | `/explanations/:id/notes` · PUT/DELETE `/notes/:id` | Notes |
+| GET / POST | `/units/:unitId/teachback` · `/teachback/audio` | History / upload+transcribe |
+| POST / DELETE | `/teachback/:id/grade` · `/teachback/:id` | Grade / delete |
+| POST | `/explanations/:id/audio` · `/artifacts/:id/audio` | Generate narration |
+| GET / DELETE | `/audio/:id/file` · `/audio/:id` | Play / delete |
+| GET | `/export/:type/:id?formats=` | ZIP download |
+| POST | `/import/analyze` · `/import/commit/:token` | Two-step import |
+| POST | `/courses/:id/ingest/docs` · `/ingest/docs/:docId/digest` · `/courses/:id/ingest/plan` · `/courses/:id/ingest/commit` | Folder ingest |
+| POST | `/explanations/:id/generate-grounded` | Grounded (re)generation |
+
+---
+
+## 9. External connections
+
+The app makes outbound requests only for the following. Everything else is local.
+
+| Destination | When | Data sent |
+|---|---|---|
+| Configured LLM server | Any generation/embedding | Prompts, unit content, queries |
+| Whisper server (optional) | Teach-back upload | Recorded audio |
+| Chatterbox server (optional) | Narration | Condensed script text |
+| Wikipedia, Openverse | "Illustrate" search/download | The selected term (+ language) |
+| Arbitrary URL | Adding a URL source; citation verification and thumbnails | The URL (UA `AuraLearn/1.0`) |
+| Google Custom Search | Citations on non-Gemini "reliable" profiles, only if `GOOGLE_CSE_*` is set | The explanation topic |
+| Gemini grounding | Citations when the active server is Gemini | The explanation topic |
+| CDNs (Tailwind, esm.run) | Page load; PDF/Office/markmap on demand | Standard browser requests |
+
+### 9.3 Citations ("further reading")
+
+Real links only — never model-written URLs. Gemini uses native Search grounding; profiles marked
+`supportsCitations` (Mistral) use Google CSE. Candidates are HEAD/GET-verified, capped at 4, classified
+as `video` (YouTube/Vimeo) or `article`, and given a best-effort `og:image` thumbnail. Any failure yields
+an empty list rather than an error.
+
+---
+
+## 10. Security and privacy
+
+| Control | Implementation |
+|---|---|
+| Network exposure | Binds `127.0.0.1` by default; `HOST` overrides. **There is no authentication**, so do not expose it. |
+| Secrets at rest | Provider API keys encrypted with AES-256-GCM (`enc:v1:` prefix); key in `data/.secret.key`. Legacy plaintext values are upgraded at boot and still read transparently. |
+| Secrets in transit to browser | Never returned; APIs expose only `hasKey`. |
+| XSS | All rendered Markdown/HTML sanitized by vendored DOMPurify 3.4.14; infographics render in a sandboxed iframe; templates escape strings. |
+| Upload handling | Audio type allow-list with server-chosen extensions; unit-membership check on `explanationIds`; import tokens expire and are bounded. |
+| Destructive actions | Confirmation dialogs (localized); hard delete, no soft-delete/trash. |
+| Open items | Unpinned CDN scripts without SRI; no CSP/security headers; no zip-bomb limit on import; see `security_assessment.md` and DEVELOPMENT_PLAN §13 (C1–C4). |
+
+---
+
+## 11. Non-functional requirements
+
+- **Performance:** designed for one user and a corpus in the thousands of chunks; retrieval is O(n)
+  per query. Long operations (generation, grading, ingest) are synchronous HTTP calls with spinners;
+  folder ingest is chunked into per-item calls so progress is visible and failures are isolated. Local
+  backends are called **serially** (they choke on concurrency).
+- **Robustness:** tolerant JSON parsing, validators and repair retries; one failing item never aborts
+  a batch (digest/expand endpoints return 200 with `ok:false`); indexing failures never block saving
+  content (they are retried by the boot backfill).
+- **Portability:** one SQLite file plus a few asset folders; Windows portable bundle with bundled Node.
+- **Accessibility/i18n:** three languages; WCAG audit and design tokens are open items (C3).
+- **Browser:** modern Chromium/Firefox with ES modules, `MediaRecorder` and Web Audio.
+
+---
+
+## 12. Testing
+
+Run with `node --test`. Present: `srs`, `rag` (chunking/cosine), `citations`, `extract`, `ingest`
+(digest, corpus map, batching, assignment), `llm/index` (repair echo), `llm/websearch`. There are no
+tests for routes, the database layer or the frontend. Manual verification practice is described in
+DEVELOPMENT_PLAN §6 — in particular, **never wipe `data/aura.db` during testing**; use throwaway rows.
+
+---
+
+## 13. Roadmap status
+
+| Item | Status |
+|---|---|
+| R1 RAG chat, R2 flashcards/SM-2, R3 study materials | **Done** |
+| R4 audio | **Done in a different shape**: per-item narration via Chatterbox (§5.9), not a unit-level summary/podcast; no Edge/ElevenLabs/OpenAI TTS adapters |
+| U1–U3 i18n, help, onboarding | Done |
+| Q1–Q4 markdown, shared sources, explanation selection, written exams | Done |
+| F1–F4 LLM robustness and logging | Done |
+| B1 teach-back | Done |
+| B2 Bloom tagging/coverage, B4 spot-the-error, B5 confidence calibration, B6 student-authored questions | **Not implemented** |
+| C1 vendor CDN scripts · C2 security headers · C3 design tokens · C4 soft-delete/trash | **Open** |
+| Folder ingest | Done |
+| Not in any plan | Re-embedding after an embedding-model change; frontend tests; per-unit audio overview/podcast |
+
+---
+
+## 14. Known gaps and doc drift
+
+1. **README "Roadmap" is stale** — it lists RAG, flashcards, study guides and audio as planned; all exist.
+2. **DEVELOPMENT_PLAN §1 and §4** still describe the pre-R1 state ("not started"), and §5 R4 describes a
+   multi-provider TTS design that was not built. §12 plans `POST /api/submissions/:id/grade-written`
+   (Q4); the real route is `POST /exams/:examId/grade-written`.
+3. **`sources.file_path` is unused by the add-source route** (Q2 planned PDF persistence under
+   `data/sources/`, and the import/export code reads it). New sources are text-only; there is no
+   `GET /sources/:id/file`. Only legacy rows could carry a path.
+4. **`submissions` table is legacy**; kept for the boot migration.
+5. **`start.bat` passes `--experimental-sqlite`**, which is only needed on older Node 22 builds; the npm
+   scripts omit it.
+6. **MCQ scoring is trusted from the client** (`PUT /exams/:id/result`); acceptable for a single-user tool.
+7. **Citations availability is environment-dependent** (Gemini, or Mistral + `GOOGLE_CSE_*`); on other
+   setups explanations simply have no "further reading".
+8. **`security_assessment.md` references `legacy/`** as deleted; `.env.local` (a Gemini key from the
+   original AI Studio export) is untracked but present and unused by the current app.
+9. **`public/__test.html`** is a leftover manual test page tracked in git.
+
+---
+
+## 15. Glossary
+
+- **Active server/provider** — the single row with `is_active = 1` in `servers`, `stt_providers` or
+  `tts_providers`; all calls of that kind go to it.
+- **Grounded** — generated from, and limited to, the unit's own sources.
+- **Profile** — per-model-family adjustments to prompts and limits (§6.2).
+- **Artifact** — a generated study object (guide, mind map, infographic, diagram).
+- **Teach-back** — explain a topic aloud; the app transcribes and grades it against your material.
