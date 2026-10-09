@@ -45,3 +45,20 @@ Thumbs.db
 *.njsproj
 *.sln
 *.sw?
+
+# v1 toolchain and build output
+.tools
+backend/.venv
+backend/.mypy_cache
+backend/.ruff_cache
+backend/.pytest_cache
+backend/htmlcov
+.coverage
+__pycache__
+*.pyc
+frontend/node_modules
+frontend/dist
+frontend/coverage
+frontend/storybook-static
+frontend/src/styles/tokens.css
+sbom
