@@ -70,6 +70,11 @@ export default tseslint.config(
     },
   },
   {
+    // Storybook callbacks are typed by the framework; inference is enough there.
+    files: ['.storybook/**', '**/*.stories.tsx'],
+    rules: { '@typescript-eslint/explicit-module-boundary-types': 'off' },
+  },
+  {
     files: ['**/*.test.{ts,tsx}', 'src/test/**'],
     rules: {
       '@typescript-eslint/no-non-null-assertion': 'off',

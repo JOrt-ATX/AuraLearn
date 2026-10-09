@@ -1,0 +1,160 @@
+name: CI
+
+on:
+  push:
+    branches: [v1]
+  pull_request:
+  workflow_dispatch:
+
+# Least privilege: jobs only read the repository (CodeQL adds security-events where needed).
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  # Test database service (throwaway credentials, CI only).
+  AURA_TEST_DATABASE_URL: postgresql+asyncpg://aura:ci-only-password@localhost:5432/aura_test
+
+jobs:
+  secrets:
+    name: Secret scan (G2)
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version: 24
+      # The pinned, checksum-verified gitleaks binary (not gitleaks-action, which needs a licence).
+      - run: node scripts/bootstrap_tools.mjs
+      - run: .tools/bin/gitleaks git --redact --no-banner --log-opts="--all"
+
+  dependencies:
+    name: Dependency gate (G3, G4)
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      # The gate uses only the standard library of the runner's Python 3.12.
+      - run: python3 scripts/check_deps.py
+
+  backend:
+    name: Backend (ruff, mypy, pytest, pip-audit)
+    runs-on: ubuntu-24.04
+    services:
+      postgres:
+        image: pgvector/pgvector:pg16@sha256:7b822b0aac60967beb1ea5e576b8602c94c300a157d187f385ae3e0da199b90a
+        env:
+          POSTGRES_USER: aura
+          POSTGRES_PASSWORD: ci-only-password
+          POSTGRES_DB: aura_test
+        ports: ["5432:5432"]
+        options: >-
+          --health-cmd "pg_isready -U aura -d aura_test"
+          --health-interval 5s --health-timeout 3s --health-retries 10
+    defaults:
+      run:
+        working-directory: backend
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: astral-sh/setup-uv@20cfd1bf945f4377ade1205e4dbc17946fc9a30d # v10.0.1
+        with:
+          version: 0.12.18
+          python-version: "3.12"
+          enable-cache: false
+      - run: uv sync --frozen
+      - run: uv run --frozen ruff check . ../scripts/check_deps.py ../scripts/check_forbidden.py
+      - run: uv run --frozen ruff format --check . ../scripts/check_deps.py ../scripts/check_forbidden.py
+      - run: uv run --frozen mypy
+      - run: uv run --frozen python ../scripts/check_forbidden.py
+      - run: uv run --frozen pytest --cov --cov-report=term-missing
+      - run: uv run --frozen pip-audit --progress-spinner off
+      - name: SBOM (CycloneDX)
+        run: |
+          mkdir -p ../sbom
+          uv run --frozen cyclonedx-py environment --output-format JSON --output-file ../sbom/backend.cdx.json
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: sbom-backend
+          path: sbom/backend.cdx.json
+
+  frontend:
+    name: Frontend (eslint, tsc, vitest, build, Storybook)
+    runs-on: ubuntu-24.04
+    defaults:
+      run:
+        working-directory: frontend
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version: 24
+      - run: npm ci
+      - run: npm run tokens
+      - run: npm run typecheck
+      - run: npm run lint
+      - run: npm run format:check
+      - run: npm run test:cov
+      - run: npm run build
+      - run: npm run build-storybook
+      - name: API client is in sync with the backend contract
+        run: |
+          npm run api:types
+          git diff --exit-code -- src/services/schema.d.ts
+      - run: npm audit --audit-level=high
+      - name: SBOM (CycloneDX)
+        run: |
+          mkdir -p ../sbom
+          npm sbom --sbom-format cyclonedx --omit dev --package-lock-only > ../sbom/frontend.cdx.json
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: sbom-frontend
+          path: sbom/frontend.cdx.json
+
+  images:
+    name: Container images and stack smoke test (RS-19)
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - name: Configure the stack
+        run: |
+          cp .env.example .env
+          sed -i 's/^POSTGRES_PASSWORD=.*/POSTGRES_PASSWORD=ci-only-password/' .env
+          mkdir -p .tools && : > .tools/corporate-ca.pem
+      - run: docker compose build
+      - run: docker compose up -d --wait --wait-timeout 180
+      - name: Smoke test through the gateway
+        run: |
+          curl --fail --silent http://localhost:8080/api/ready
+          curl --fail --silent http://localhost:8080/ | grep -q '<div id="root">'
+      - name: Containers run hardened
+        run: |
+          for c in api web; do
+            docker inspect "aura-learn-$c-1" --format '{{.Name}} user={{.Config.User}} ro={{.HostConfig.ReadonlyRootfs}}'
+          done
+      - if: failure()
+        run: docker compose logs --no-color
+      - if: always()
+        run: docker compose down -v
+
+  codeql:
+    name: CodeQL (SAST)
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: read
+      security-events: write
+    strategy:
+      fail-fast: false
+      matrix:
+        language: [javascript-typescript, python]
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: github/codeql-action/init@cdf488f595d80d6e07e03d4674febd5ab45fa938 # v4.37.9
+        with:
+          languages: ${{ matrix.language }}
+      - uses: github/codeql-action/analyze@cdf488f595d80d6e07e03d4674febd5ab45fa938 # v4.37.9
+        with:
+          category: /language:${{ matrix.language }}
