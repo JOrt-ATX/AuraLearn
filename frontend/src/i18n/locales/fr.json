@@ -1,0 +1,75 @@
+{
+  "app": {
+    "name": "Aura Learn"
+  },
+  "common": {
+    "save": "Enregistrer",
+    "cancel": "Annuler",
+    "settings": "Paramètres",
+    "done": "Terminé",
+    "help": "Aide",
+    "edit": "Modifier",
+    "delete": "Supprimer",
+    "clear": "Effacer",
+    "close": "Fermer",
+    "retry": "Réessayer",
+    "loading": "Chargement…",
+    "search": "Rechercher"
+  },
+  "nav": {
+    "home": "Accueil",
+    "main": "Navigation principale",
+    "toggleSidebar": "Afficher ou masquer la barre latérale",
+    "breadcrumb": "Fil d'Ariane",
+    "sidebarDescription": "Liens vers les principales sections de l'application.",
+    "more": "Plus"
+  },
+  "layout": {
+    "skipToContent": "Aller au contenu",
+    "language": "Langue",
+    "openCommandPalette": "Ouvrir la palette de commandes",
+    "commandShortcut": "Ctrl K"
+  },
+  "commandPalette": {
+    "title": "Palette de commandes",
+    "description": "Recherchez une page ou une action.",
+    "placeholder": "Saisissez une commande ou recherchez…",
+    "empty": "Aucun résultat.",
+    "pages": "Pages",
+    "languages": "Langue"
+  },
+  "home": {
+    "title": "Bienvenue sur Aura Learn",
+    "subtitle": "Votre espace d'apprentissage en entreprise. Les cours et les outils d'étude apparaîtront ici.",
+    "status": {
+      "title": "État du service",
+      "checking": "Vérification du service…",
+      "ready": "Le service est prêt.",
+      "unavailable": "Le service n'est pas disponible pour le moment."
+    }
+  },
+  "notFound": {
+    "title": "Page introuvable",
+    "description": "La page que vous cherchez n'existe pas ou a été déplacée.",
+    "backHome": "Retour à l'accueil"
+  },
+  "errors": {
+    "unknown": "Une erreur s'est produite. Veuillez réessayer.",
+    "network": "Impossible de joindre le serveur. Vérifiez votre connexion et réessayez.",
+    "bad_request": "La requête n'est pas valide.",
+    "unauthorized": "Vous devez vous connecter pour continuer.",
+    "forbidden": "Vous n'avez pas l'autorisation de faire cela.",
+    "not_found": "Nous n'avons pas trouvé ce que vous avez demandé.",
+    "method_not_allowed": "Cette action n'est pas autorisée.",
+    "conflict": "Cela entre en conflit avec l'état actuel. Rechargez et réessayez.",
+    "validation_error": "Une partie des informations n'est pas valide.",
+    "too_many_requests": "Trop de requêtes. Veuillez patienter un instant.",
+    "internal_error": "Le serveur a rencontré une erreur inattendue.",
+    "service_unavailable": "Le service est temporairement indisponible."
+  },
+  "languages": {
+    "en": "English",
+    "es": "Español",
+    "fr": "Français"
+  }
+}

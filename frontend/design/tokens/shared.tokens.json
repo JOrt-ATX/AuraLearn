@@ -1,0 +1,37 @@
+{
+  "radius": {
+    "$type": "dimension",
+    "$value": "0.5rem",
+    "$description": "Base radius; sm/md/lg/xl derive from it (0.25/0.375/0.5/0.75rem)."
+  },
+  "space": {
+    "$type": "dimension",
+    "xs": {
+      "$value": "0.25rem"
+    },
+    "sm": {
+      "$value": "0.5rem"
+    },
+    "md": {
+      "$value": "1rem"
+    },
+    "lg": {
+      "$value": "1.5rem"
+    },
+    "xl": {
+      "$value": "2rem"
+    },
+    "2xl": {
+      "$value": "3rem"
+    }
+  },
+  "font": {
+    "$type": "fontFamily",
+    "sans": {
+      "$value": "\"Inter Variable\", ui-sans-serif, system-ui, sans-serif"
+    },
+    "mono": {
+      "$value": "\"JetBrains Mono Variable\", ui-monospace, monospace"
+    }
+  }
+}

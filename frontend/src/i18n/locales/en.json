@@ -1,0 +1,75 @@
+{
+  "app": {
+    "name": "Aura Learn"
+  },
+  "common": {
+    "save": "Save",
+    "cancel": "Cancel",
+    "settings": "Settings",
+    "done": "Done",
+    "help": "Help",
+    "edit": "Edit",
+    "delete": "Delete",
+    "clear": "Clear",
+    "close": "Close",
+    "retry": "Try again",
+    "loading": "Loading…",
+    "search": "Search"
+  },
+  "nav": {
+    "home": "Home",
+    "main": "Main navigation",
+    "toggleSidebar": "Toggle sidebar",
+    "breadcrumb": "Breadcrumb",
+    "sidebarDescription": "Links to the main sections of the app.",
+    "more": "More"
+  },
+  "layout": {
+    "skipToContent": "Skip to content",
+    "language": "Language",
+    "openCommandPalette": "Open command palette",
+    "commandShortcut": "Ctrl K"
+  },
+  "commandPalette": {
+    "title": "Command palette",
+    "description": "Search for a page or an action.",
+    "placeholder": "Type a command or search…",
+    "empty": "No results found.",
+    "pages": "Pages",
+    "languages": "Language"
+  },
+  "home": {
+    "title": "Welcome to Aura Learn",
+    "subtitle": "Your corporate learning workspace. Courses and study tools will appear here.",
+    "status": {
+      "title": "Service status",
+      "checking": "Checking the service…",
+      "ready": "The service is ready.",
+      "unavailable": "The service is not available right now."
+    }
+  },
+  "notFound": {
+    "title": "Page not found",
+    "description": "The page you are looking for does not exist or has moved.",
+    "backHome": "Back to home"
+  },
+  "errors": {
+    "unknown": "Something went wrong. Please try again.",
+    "network": "Could not reach the server. Check your connection and try again.",
+    "bad_request": "The request was not valid.",
+    "unauthorized": "You need to sign in to continue.",
+    "forbidden": "You do not have permission to do this.",
+    "not_found": "We could not find what you asked for.",
+    "method_not_allowed": "This action is not allowed.",
+    "conflict": "This conflicts with the current state. Reload and try again.",
+    "validation_error": "Some of the information is not valid.",
+    "too_many_requests": "Too many requests. Please wait a moment.",
+    "internal_error": "The server hit an unexpected error.",
+    "service_unavailable": "The service is temporarily unavailable."
+  },
+  "languages": {
+    "en": "English",
+    "es": "Español",
+    "fr": "Français"
+  }
+}
