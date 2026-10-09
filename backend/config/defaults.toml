@@ -1,0 +1,36 @@
+# Platform defaults (HR0/HR8): every tunable lives here or, from F3, in the admin console.
+# Layers are deep-merged (HR10): defaults < AURA_CONFIG_FILE < (F3) database overrides.
+# Secrets never go here: they come from the environment (AURA_*).
+
+[app]
+name = "Aura Learn"
+environment = "development"
+
+[server]
+host = "0.0.0.0"
+port = 8000
+
+[api]
+prefix = "/api"
+openapi_enabled = true
+
+[logging]
+level = "INFO"
+
+[database]
+pool_size = 5
+max_overflow = 5
+pool_pre_ping = true
+
+[cors]
+allowed_origins = ["http://localhost:8080", "http://localhost:5173"]
+allowed_methods = ["GET", "POST", "PUT", "PATCH", "DELETE"]
+allowed_headers = ["Content-Type", "X-CSRF-Token"]
+max_age_seconds = 600
+
+[security_headers]
+content_security_policy = "default-src 'none'; frame-ancestors 'none'; base-uri 'none'"
+referrer_policy = "no-referrer"
+permissions_policy = "camera=(), microphone=(), geolocation=()"
+hsts_enabled = false
+hsts_max_age_seconds = 31536000

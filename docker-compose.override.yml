@@ -1,0 +1,6 @@
+# Local development only (docker compose loads this file automatically).
+# Deployments use `docker compose -f docker-compose.yml` and never publish the database.
+services:
+  db:
+    ports:
+      - "127.0.0.1:5432:5432"

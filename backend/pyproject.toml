@@ -1,0 +1,75 @@
+[project]
+name = "aura-learn-backend"
+version = "1.0.0.dev0"
+description = "Aura Learn v1 API (FastAPI, SQLAlchemy 2.0 async, PostgreSQL 16 + pgvector)"
+requires-python = ">=3.12,<3.13"
+dependencies = [
+    "fastapi==0.141.1",
+    "uvicorn==0.52.4",
+    "pydantic==2.13.5",
+    "pydantic-settings==2.15.0",
+    "sqlalchemy==2.0.52",
+    "asyncpg==0.31.0",
+    "alembic==1.19.2",
+]
+
+[dependency-groups]
+dev = [
+    "pytest==9.1.1",
+    "pytest-asyncio==1.4.0",
+    "pytest-cov==7.1.0",
+    "httpx==0.28.1",
+    "ruff==0.16.6",
+    "mypy==2.3.1",
+    "pip-audit==2.10.1",
+    "cyclonedx-bom==7.3.1",
+]
+
+[tool.uv]
+# Supply-chain cooldown (G3): nothing published after this instant is resolved.
+# Security-patch exceptions are recorded in docs/dependency-policy.json.
+exclude-newer = "2026-09-08T00:00:00Z"
+# Security-patch exception: urllib3 2.7.0 has PYSEC-2026-4175/4176/4177, fixed in 2.8.0.
+exclude-newer-package = { urllib3 = "2026-10-09T00:00:00Z" }
+package = false
+required-environments = [
+    "sys_platform == 'win32'",
+    "sys_platform == 'linux'",
+]
+
+[tool.ruff]
+line-length = 100
+target-version = "py312"
+src = ["."]
+
+[tool.ruff.lint]
+select = ["E", "W", "F", "I", "B", "UP", "S", "ASYNC", "SIM", "RUF", "T20", "PTH", "N", "C4", "TID", "PL", "TRY"]
+ignore = ["PLR2004", "TRY003"]
+
+[tool.ruff.lint.per-file-ignores]
+"tests/**" = ["S101", "S105", "S106", "PLR0913"]
+"migrations/**" = ["N999"]
+
+[tool.ruff.lint.flake8-tidy-imports.banned-api]
+"__future__.annotations" = { msg = "Forbidden (HR/RS-21): Python 3.12 does not need it and it breaks FastAPI include_router()." }
+
+[tool.mypy]
+python_version = "3.12"
+strict = true
+plugins = ["pydantic.mypy"]
+files = ["app", "tests", "migrations"]
+
+[tool.pytest.ini_options]
+asyncio_mode = "auto"
+asyncio_default_fixture_loop_scope = "function"
+testpaths = ["tests"]
+pythonpath = ["."]
+addopts = "-ra --strict-markers"
+
+[tool.coverage.run]
+source = ["app"]
+branch = true
+
+[tool.coverage.report]
+fail_under = 80
+show_missing = true
