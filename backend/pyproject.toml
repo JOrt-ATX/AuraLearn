@@ -58,7 +58,7 @@ ignore = ["PLR2004", "TRY003"]
 python_version = "3.12"
 strict = true
 plugins = ["pydantic.mypy"]
-files = ["app", "tests", "migrations"]
+files = ["app", "tests", "migrations", "../scripts/check_deps.py", "../scripts/check_forbidden.py"]
 
 [tool.pytest.ini_options]
 asyncio_mode = "auto"
