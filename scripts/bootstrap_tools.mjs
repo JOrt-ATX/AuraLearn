@@ -60,6 +60,10 @@ await install('gitleaks');
 // Python 3.12 lives inside the project; the system Python, ~/.local/bin and the registry are never touched.
 execFileSync(uv, ['python', 'install', PINS.python.version], { stdio: 'inherit', env: uvEnv });
 
+// Placeholder for the optional corporate root CA used by container builds (see docker-compose.yml).
+const ca = join(TOOLS, 'corporate-ca.pem');
+if (!existsSync(ca)) writeFileSync(ca, '');
+
 // Versioned hooks: the pre-commit guardrail (G1) runs for humans, agents and scripts alike.
 execFileSync('git', ['config', 'core.hooksPath', '.githooks'], { cwd: ROOT });
 console.log('git core.hooksPath = .githooks');

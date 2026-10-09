@@ -54,6 +54,33 @@ services:
       - /tmp
     expose:
       - "8000"
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8000/api/health')"]
+      interval: 10s
+      timeout: 3s
+      retries: 6
+      start_period: 10s
+
+  web:
+    <<: *hardened
+    build:
+      context: ./frontend
+      secrets:
+        - corporate_ca
+    depends_on:
+      api:
+        condition: service_healthy
+    read_only: true
+    tmpfs:
+      - /tmp
+    ports:
+      - "${WEB_PORT:-8080}:8080"
+
+secrets:
+  # Optional corporate root CA for TLS-inspecting proxies; an empty file means "none".
+  # Create it with scripts/export_corporate_ca.ps1 (Windows) or point CORPORATE_CA_FILE elsewhere.
+  corporate_ca:
+    file: ${CORPORATE_CA_FILE:-./.tools/corporate-ca.pem}
 
 volumes:
   db-data:
